@@ -44,6 +44,7 @@ from app.database.schema import (  # noqa: E402
 )
 from app.services.analyze import AnalysisError, analyze_call  # noqa: E402
 from app.services.attention_score import compute_attention_score  # noqa: E402
+from app.services.chroma import add_call_to_chroma  # noqa: E402
 
 
 class CallProcessingError(RuntimeError):
@@ -157,6 +158,27 @@ def _save_call(session: Session, call_id: str, meta: dict, audio_path: Path, mer
         )
 
     session.commit()
+
+    # Best-effort: the call is already durably saved above, so a search-index
+    # hiccup here shouldn't fail the whole pipeline run.
+    try:
+        add_call_to_chroma(
+            call_id=call_id,
+            summary=analysis["summary"],
+            metadata={
+                "call_id": call_id,
+                "customer_name": customer.name,
+                "agent_name": agent.name,
+                "intent": analysis["intent"],
+                "resolution": analysis["resolution"],
+                "attention_score": score,
+                "initial_mood": analysis["initial_mood"],
+                "final_mood": analysis["final_mood"],
+                "duration_seconds": meta["duration_seconds"],
+            },
+        )
+    except Exception as e:
+        print(f"  [warning] failed to add call {call_id} to ChromaDB search index: {e}")
 
 
 def _check_already_processed(session: Session, call_id: str) -> bool:

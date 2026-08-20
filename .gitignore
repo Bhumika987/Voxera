@@ -10,6 +10,7 @@ data/audio/
 data/metadata/
 data/processed/
 data/vexora.db*
+data/chroma_db/
 data/errors.log
 data/batch_run.log
 backend/pip_install_shared*.log
