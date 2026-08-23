@@ -10,6 +10,7 @@ sqlalchemy==2.0.35
 
 # --- dev / tests ---
 pytest>=8.3.0
+httpx>=0.28.1
 
 # --- AI analysis (app/services/analyze.py) ---
 groq>=1.6.0
