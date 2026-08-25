@@ -6,8 +6,15 @@ customer channels concurrently too, via process_one_call_async — so at the
 default MAX_CONCURRENCY=5 there are up to 10 AssemblyAI requests in flight at
 a time). Already-processed calls are skipped cheaply (a DB lookup, no
 transcription) so re-running this after a partial run or a crash just picks
-up where it left off. Failures are logged to data/errors.log and do not stop
-the rest of the batch.
+up where it left off. Per-call failures are logged to data/errors.log and do
+not stop the rest of the batch.
+
+EXCEPTION: a ModelUnavailableError (wrong model name, or this key/account has
+no access to it) is NOT treated as a per-call failure — it's a config
+problem that will repeat identically on every remaining call, so the whole
+batch stops immediately instead of grinding through 1400+ guaranteed-identical
+errors. In-flight calls (up to `concurrency` of them) are allowed to finish;
+no new ones are started once this fires.
 
 Run directly:
     venv\\Scripts\\python.exe backend\\pipeline\\batch_process.py
@@ -29,6 +36,7 @@ from tqdm import tqdm  # noqa: E402
 
 from process_one_call import CallProcessingError, process_one_call_async  # noqa: E402
 from app.database.schema import init_db  # noqa: E402
+from app.services.analyze import ModelUnavailableError  # noqa: E402
 
 PROJECT_ROOT = BACKEND_ROOT.parent
 AUDIO_DIR = PROJECT_ROOT / "data" / "audio"
@@ -59,18 +67,33 @@ def discover_call_pairs(limit: int | None = None) -> list[tuple[Path, Path]]:
     return pairs
 
 
-async def run_batch(pairs: list[tuple[Path, Path]], concurrency: int) -> tuple[int, int]:
+async def run_batch(pairs: list[tuple[Path, Path]], concurrency: int) -> tuple[int, int, str | None]:
+    """Returns (succeeded, failed, stop_reason). stop_reason is None on a
+    normal run; if set, the batch was halted early due to a ModelUnavailableError."""
     semaphore = asyncio.Semaphore(concurrency)
     succeeded = 0
     failed = 0
+    stop_reason: str | None = None
     progress = tqdm(total=len(pairs), unit="call")
 
     async def _worker(audio_path: Path, metadata_path: Path):
-        nonlocal succeeded, failed
+        nonlocal succeeded, failed, stop_reason
+        if stop_reason is not None:
+            return  # already stopping — don't start new work
+
         async with semaphore:
+            if stop_reason is not None:
+                return  # could have been set while waiting on the semaphore
+
             try:
                 await process_one_call_async(audio_path, metadata_path)
                 succeeded += 1
+            except ModelUnavailableError as e:
+                if stop_reason is None:
+                    stop_reason = str(e)
+                    print(f"\n\nSTOPPING BATCH: {e}")
+                    print("(not switching models, not retrying — letting any already-in-flight calls finish)")
+                logger.error(f"{audio_path.stem}: STOPPED BATCH — {e}")
             except CallProcessingError as e:
                 failed += 1
                 logger.error(f"{audio_path.stem}: {e}")
@@ -83,7 +106,7 @@ async def run_batch(pairs: list[tuple[Path, Path]], concurrency: int) -> tuple[i
 
     await asyncio.gather(*(_worker(a, m) for a, m in pairs))
     progress.close()
-    return succeeded, failed
+    return succeeded, failed, stop_reason
 
 
 def _main() -> None:
@@ -98,7 +121,7 @@ def _main() -> None:
     print(f"Concurrency: {args.concurrency} calls at a time. Errors go to {ERROR_LOG_PATH}")
 
     start = time.time()
-    succeeded, failed = asyncio.run(run_batch(pairs, args.concurrency))
+    succeeded, failed, stop_reason = asyncio.run(run_batch(pairs, args.concurrency))
     elapsed_minutes = (time.time() - start) / 60
 
     print(f"\nTotal processed: {succeeded}")
@@ -106,6 +129,12 @@ def _main() -> None:
     print(f"Time taken: {elapsed_minutes:.1f} minutes")
     if failed:
         print(f"See {ERROR_LOG_PATH} for details on failures.")
+
+    if stop_reason is not None:
+        print(f"\nBATCH STOPPED EARLY — model unavailable: {stop_reason}")
+        print("Fix the model name / key access, then rerun the same command — it will")
+        print("skip everything already done above and continue from where this stopped.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

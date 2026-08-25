@@ -88,6 +88,17 @@ class Call(Base):
     # --- deterministic score (app/services/attention_score.py), not AI-generated ---
     attention_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Which model actually produced the analysis (e.g. "openai/gpt-oss-120b",
+    # "openai/gpt-oss-20b", "llama3.1:8b (ollama)") — lets you find and redo
+    # calls that fell back to a lower-tier model with a plain SQL query
+    # instead of reconstructing it from terminal logs by hand.
+    model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Which transcription provider handled each channel, e.g.
+    # "agent=assemblyai,customer=assemblyai" — a value other than both-assemblyai
+    # means step2_transcribe.py's fallback chain kicked in for that channel.
+    transcription_provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="calls")

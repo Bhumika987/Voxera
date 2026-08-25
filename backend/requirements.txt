@@ -11,8 +11,15 @@ sqlalchemy==2.0.35
 # --- dev / tests ---
 pytest>=8.3.0
 
-# --- AI analysis (app/services/analyze.py) ---
+# --- AI analysis (app/services/analyze.py): Groq primary, Ollama last resort ---
 groq>=1.6.0
+openai>=1.0.0
+# openai package is used as an OpenAI-compatible client for the Ollama tier.
+# Ollama itself needs the Ollama app installed + running locally
+# (https://ollama.com) with `ollama pull llama3.1:8b` — not a pip package.
+
+# --- transcription fallback chain (step2_transcribe.py): AssemblyAI -> Groq Whisper -> local ---
+faster-whisper>=1.2.1
 
 # --- Sneha: API + ChromaDB (installed here so the venv is shared) ---
 # NOTE: version floors bumped from the original hackathon brief because this
