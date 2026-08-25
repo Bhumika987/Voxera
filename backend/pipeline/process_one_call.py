@@ -42,7 +42,7 @@ from app.database.schema import (  # noqa: E402
     get_session,
     init_db,
 )
-from app.services.analyze import AnalysisError, analyze_call  # noqa: E402
+from app.services.analyze import AnalysisError, ModelUnavailableError, analyze_call  # noqa: E402
 from app.services.attention_score import compute_attention_score  # noqa: E402
 from app.services.chroma import add_call_to_chroma  # noqa: E402
 
@@ -82,7 +82,9 @@ def _check_repeat_contact(session: Session, customer_id: int) -> tuple[bool, str
     return True, f"previous call {prior.id} on {prior.started_at.date()}"
 
 
-def _save_call(session: Session, call_id: str, meta: dict, audio_path: Path, merged: dict) -> None:
+def _save_call(
+    session: Session, call_id: str, meta: dict, audio_path: Path, merged: dict, transcription_provider: str
+) -> None:
     """Runs analysis + deterministic scoring on an already-merged transcript (see
     step3_merge_transcript.merge_transcript) and writes everything for one call.
     Shared by both the sync and async pipelines below."""
@@ -119,6 +121,8 @@ def _save_call(session: Session, call_id: str, meta: dict, audio_path: Path, mer
         mood_shift_time=analysis["mood_shift_time"],
         mood_shift_segment_id=analysis["mood_shift_segment_id"],
         attention_score=score,
+        model_used=analysis["model_used"],
+        transcription_provider=transcription_provider,
         processed=True,
     )
     session.add(call)
@@ -210,13 +214,21 @@ def process_one_call(audio_path: Path, metadata_path: Path, session: Session | N
             return call_id  # already done — do NOT re-transcribe
 
         split_result = split_audio(audio_path)
-        agent_segments = transcribe_wav(split_result["agent_wav"], "agent")
-        customer_segments = transcribe_wav(split_result["customer_wav"], "customer")
+        agent_segments, agent_provider = transcribe_wav(split_result["agent_wav"], "agent")
+        customer_segments, customer_provider = transcribe_wav(split_result["customer_wav"], "customer")
         merged = merge_transcript(agent_segments, customer_segments)
+        transcription_provider = f"agent={agent_provider},customer={customer_provider}"
 
-        _save_call(session, call_id, meta, audio_path, merged)
+        _save_call(session, call_id, meta, audio_path, merged, transcription_provider)
         return call_id
 
+    except ModelUnavailableError:
+        # Not a per-call failure — a config problem that will repeat
+        # identically for every remaining call. Let it propagate unwrapped
+        # so batch_process.py can stop the whole run instead of logging it
+        # 1400+ times.
+        session.rollback()
+        raise
     except (AudioSplitError, TranscriptionError, MetadataError, AnalysisError) as e:
         session.rollback()
         raise CallProcessingError(str(e)) from e
@@ -244,15 +256,19 @@ async def process_one_call_async(audio_path: Path, metadata_path: Path) -> str:
             return call_id
 
         split_result = await asyncio.to_thread(split_audio, audio_path)
-        agent_segments, customer_segments = await asyncio.gather(
+        (agent_segments, agent_provider), (customer_segments, customer_provider) = await asyncio.gather(
             transcribe_wav_async(split_result["agent_wav"], "agent"),
             transcribe_wav_async(split_result["customer_wav"], "customer"),
         )
         merged = merge_transcript(agent_segments, customer_segments)
+        transcription_provider = f"agent={agent_provider},customer={customer_provider}"
 
-        _save_call(session, call_id, meta, audio_path, merged)
+        _save_call(session, call_id, meta, audio_path, merged, transcription_provider)
         return call_id
 
+    except ModelUnavailableError:
+        session.rollback()
+        raise
     except (AudioSplitError, TranscriptionError, MetadataError, AnalysisError) as e:
         session.rollback()
         raise CallProcessingError(str(e)) from e
