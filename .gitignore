@@ -10,6 +10,7 @@ data/audio/
 data/metadata/
 data/processed/
 data/vexora.db*
+data/vexora_backup*.db
 data/chroma_db/
 data/errors.log
 data/batch_run.log
