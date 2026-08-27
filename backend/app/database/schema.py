@@ -76,8 +76,10 @@ class Call(Base):
     # --- AI analysis output (filled in by app/services/analyze.py) ---
     intent: Mapped[str | None] = mapped_column(Text, nullable=True)
     intent_evidence_segment_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    intent_category: Mapped[str | None] = mapped_column(String(32), nullable=True)  # closed vocabulary, see analyze.py's INTENT_CATEGORIES
 
     resolution: Mapped[str | None] = mapped_column(String(32), nullable=True)  # "resolved" | "unresolved" | "unknown"
+    resolution_evidence_segment_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # <= 40 words
 
     initial_mood: Mapped[str | None] = mapped_column(String(32), nullable=True)

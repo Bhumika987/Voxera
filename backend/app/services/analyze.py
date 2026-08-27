@@ -15,7 +15,9 @@ Output: a dict with exactly these keys:
     {
         "intent": str,
         "intent_evidence_segment_id": str|None,
+        "intent_category": str,                   # one of INTENT_CATEGORIES
         "resolution": "resolved" | "unresolved" | "unknown",
+        "resolution_evidence_segment_id": str|None,
         "summary": str,                          # <= 40 words
         "initial_mood": str, "final_mood": str,   # one of MOOD_VALUES
         "mood_events": [{ "timestamp": float, "mood_before": str, "mood_after": str, "segment_id": str }, ...],
@@ -100,6 +102,33 @@ RETRY_BACKOFF_SECONDS = 3
 MOOD_VALUES = ("happy", "neutral", "confused", "frustrated", "angry")
 MoodValue = Literal["happy", "neutral", "confused", "frustrated", "angry"]
 
+# Closed intent-category vocabulary so /api/trends can group calls without
+# free-text intent phrasing fragmenting semantically-identical intents apart.
+INTENT_CATEGORIES = (
+    "LOST_CARD",
+    "DUPLICATE_CHARGE",
+    "PASSWORD_RESET",
+    "TRANSFER_MONEY",
+    "BALANCE_CHECK",
+    "ACCOUNT_CLOSURE",
+    "BILL_PAYMENT",
+    "BRANCH_INQUIRY",
+    "APPOINTMENT_SCHEDULING",
+    "OTHER",
+)
+IntentCategory = Literal[
+    "LOST_CARD",
+    "DUPLICATE_CHARGE",
+    "PASSWORD_RESET",
+    "TRANSFER_MONEY",
+    "BALANCE_CHECK",
+    "ACCOUNT_CLOSURE",
+    "BILL_PAYMENT",
+    "BRANCH_INQUIRY",
+    "APPOINTMENT_SCHEDULING",
+    "OTHER",
+]
+
 _groq_client: groq.Groq | None = None
 _ollama_client: OpenAI | None = None
 
@@ -146,7 +175,9 @@ class MoodEventModel(BaseModel):
 class CallAnalysisModel(BaseModel):
     intent: str
     intent_evidence_segment_id: str | None = None
+    intent_category: IntentCategory = "OTHER"
     resolution: Literal["resolved", "unresolved", "unknown"]
+    resolution_evidence_segment_id: str | None = None
     summary: str
     initial_mood: MoodValue
     final_mood: MoodValue
@@ -165,7 +196,9 @@ no evidence, so if you're not sure, use null rather than guess.
 Rules:
 - intent: what the customer actually wanted, in a short paraphrase (not just quoting their first line — read the whole call to find their real goal).
 - intent_evidence_segment_id: the segment id where the customer states or reveals that intent.
+- intent_category: classify the intent into exactly one of: {", ".join(INTENT_CATEGORIES)}. Use OTHER if none clearly fit.
 - resolution: "resolved" only if the transcript shows the issue was actually addressed by the end of the call; "unresolved" if it clearly wasn't; "unknown" if the transcript doesn't make it clear either way.
+- resolution_evidence_segment_id: the segment id where the transcript shows the resolution outcome (or null if resolution is "unknown" or no single segment proves it).
 - summary: <= 40 words, plain language, what happened and the outcome.
 - initial_mood / final_mood: the customer's mood at the start vs end of the call. Must be exactly one of: {", ".join(MOOD_VALUES)}.
 - mood_events: every time the customer's mood meaningfully changed during the call, in order, each with the exact segment id and timestamp where the shift becomes evident. Empty list if mood never shifted.
@@ -175,7 +208,9 @@ Respond with ONLY a single JSON object (no markdown, no code fences, no commenta
 {{
   "intent": "<string>",
   "intent_evidence_segment_id": "<segment id or null>",
+  "intent_category": "<one of: {", ".join(INTENT_CATEGORIES)}>",
   "resolution": "resolved" | "unresolved" | "unknown",
+  "resolution_evidence_segment_id": "<segment id or null>",
   "summary": "<string, <=40 words>",
   "initial_mood": "<one of: {", ".join(MOOD_VALUES)}>",
   "final_mood": "<one of: {", ".join(MOOD_VALUES)}>",
@@ -330,7 +365,9 @@ def analyze_call(formatted_text: str, segments: list[dict]) -> dict:
     return {
         "intent": analysis.intent,
         "intent_evidence_segment_id": _validate_segment_id(analysis.intent_evidence_segment_id, valid_ids),
+        "intent_category": analysis.intent_category,
         "resolution": analysis.resolution,
+        "resolution_evidence_segment_id": _validate_segment_id(analysis.resolution_evidence_segment_id, valid_ids),
         "summary": " ".join(analysis.summary.split()[:40]),
         "initial_mood": analysis.initial_mood,
         "final_mood": analysis.final_mood,
