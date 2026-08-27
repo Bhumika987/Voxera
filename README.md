@@ -20,19 +20,21 @@ vexora/
 │       ├── database/schema.py         # SQLite schema (SQLAlchemy models)
 │       ├── services/analyze.py        # AI analysis (intent/mood/resolution/summary) — Groq (openai/gpt-oss-120b)
 │       ├── services/attention_score.py# deterministic needs-attention scoring
-│       └── api/                       # FastAPI routes — not yet built
+│       ├── services/chroma.py         # ChromaDB semantic search over call summaries
+│       └── main.py                    # FastAPI app — 10 routes, see "Running the API" below
 ├── data/
 │   ├── audio/<id>.mp3       # provided
 │   ├── metadata/<id>.json   # provided
 │   ├── processed/           # WAVs produced by step 1 (gitignored)
+│   ├── chroma_db/           # ChromaDB persistent store (gitignored)
 │   └── vexora.db            # SQLite database (gitignored)
-└── frontend/                 # dashboard — not yet built
+└── frontend/                 # React + Vite dashboard, see "Running the frontend" below
 ```
 
 **Status:** the full pipeline (audio → transcript → AI analysis → scored,
-queryable database) is complete, tested end-to-end against real audio, real
-AssemblyAI transcription, and real Groq analysis. The FastAPI layer and the
-React dashboard are not built yet.
+queryable database) is complete and has processed all 1,441 calls. The
+FastAPI layer (`backend/app/main.py`) and the React dashboard
+(`frontend/`) are both built and run against that data.
 
 `app/services/analyze.py` calls Groq's `openai/gpt-oss-120b` model with a
 JSON-schema-constrained prompt (Groq's JSON mode only guarantees valid JSON,
@@ -129,6 +131,39 @@ duration, prior-call history, a keyword scan for manager/supervisor/
 escalate requests) — every triggered rule is stored with the reason, its
 point value, and the transcript segment that justifies it where one exists.
 
+## Running the API
+
+Once the database is populated (see above — or use the `data/vexora.db` that
+already ships with a full run of all 1,441 calls), start the FastAPI app
+from `backend/`:
+```
+cd backend
+venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+Interactive docs at `http://localhost:8000/docs`. CORS is pre-configured for
+`http://localhost:3000` and `http://localhost:5173` (the frontend dev
+server). Ten routes: `/api/health`, `/api/dashboard/overview`,
+`/api/calls/{id}`, `/api/calls/{id}/audio`, `/api/attention`,
+`/api/customers`, `/api/customers/{id}/calls`, `/api/agents`,
+`/api/trends`, `/api/search?q=`.
+
+## Running the frontend
+
+Requires the API running on `:8000` (above) — the dashboard reads
+everything through it, nothing is re-transcribed or re-analyzed client-side.
+```
+cd frontend
+npm install
+npm run dev
+```
+Open `http://localhost:5173`. `frontend/.env` points it at
+`VITE_API_BASE_URL=http://localhost:8000` — change that if you run the API
+elsewhere. Stack: React + Vite, Tailwind CSS v4, React Router, Recharts,
+Axios, lucide-react. Dark/light theme toggle persists in `localStorage`
+(defaults to dark). See `frontend/src/components/` for the shared,
+evidence-first building blocks (`EvidenceChip`, `ScorePill`, `MoodChip`,
+`MoodTimeline`, `AudioPlayer`) reused across all five pages.
+
 ## Testing
 
 Unit tests cover the deterministic parts of the pipeline (transcript merging,
@@ -145,8 +180,13 @@ Customer identity is matched by name only (the dataset contains no customer
 ID field). Two customers with identical names will be merged into one
 history. This is a known tradeoff given the dataset structure, not a bug.
 
-## Next steps (not yet built)
+## Known gaps
 
-- `backend/app/api/` — FastAPI routes exposing the per-call analysis via the
-  contract in the project brief.
-- `frontend/` — the React dashboard.
+- `GET /api/calls/{id}` doesn't return `resolution_evidence_segment_id` or
+  `intent_category` yet, even though both columns exist in the DB (backfilled
+  by `backend/scripts/`). The frontend's Resolution card is built to show
+  these once the API adds them — until then it renders an explicit
+  "Evidence pending" state rather than hiding the slot.
+- `GET /api/trends` and the Attention Queue's intent badges group on the raw
+  free-text `Call.intent` column, not the closed `intent_category` enum —
+  same reason, and same forward-compatible styling on the frontend.
