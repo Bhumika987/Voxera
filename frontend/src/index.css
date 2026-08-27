@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Dark mode is driven by [data-theme="dark"] on <html>, not prefers-color-scheme. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --color-bg: #f6f7f9;
+  --color-panel: #ffffff;
+  --color-panel-raised: #ffffff;
+  --color-border: #e7e9ed;
+  --color-accent: #3568d4;
+  --color-text-primary: #14161a;
+  --color-text-secondary: #5a616d;
+}
+
+[data-theme="dark"] {
+  --color-bg: #0b0d11;
+  --color-panel: #12151b;
+  --color-panel-raised: #171b22;
+  --color-border: #242a33;
+  --color-accent: #5b8def;
+  --color-text-primary: #edeff2;
+  --color-text-secondary: #98a1b0;
+}
+
+@theme inline {
+  --color-app-bg: var(--color-bg);
+  --color-app-panel: var(--color-panel);
+  --color-app-panel-raised: var(--color-panel-raised);
+  --color-app-border: var(--color-border);
+  --color-app-accent: var(--color-accent);
+  --color-app-text: var(--color-text-primary);
+  --color-app-text-secondary: var(--color-text-secondary);
+
+  /* Mood scale — identical in both themes, always paired with a text label. */
+  --color-mood-happy: #3fbf7f;
+  --color-mood-neutral: #8b93a3;
+  --color-mood-confused: #e0a83e;
+  --color-mood-frustrated: #e0793e;
+  --color-mood-angry: #e0524a;
+
+  /* Attention-score bands — separate scale, same low/mid/high hue family as mood. */
+  --color-score-critical: #dc3d3d;
+  --color-score-high: #e0a83e;
+  --color-score-watch: #edc077;
+  --color-score-normal: #3fbf7f;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono-data: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-app-bg);
+  color: var(--color-app-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-app-accent) 35%, transparent);
+}
+
+/* Slim scrollbars to fit the data-dense chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-app-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-app-border);
+  border-radius: 999px;
+}
