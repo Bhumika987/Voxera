@@ -180,6 +180,11 @@ Customer identity is matched by name only (the dataset contains no customer
 ID field). Two customers with identical names will be merged into one
 history. This is a known tradeoff given the dataset structure, not a bug.
 
+In this dataset it's not a rare edge case: all 1,441 calls resolve to only
+100 unique customer names, a ~14.4x average reuse rate. So most "customer
+histories" in the app are really an aggregate of several different real
+people who happen to share a name, not one person's repeat contacts.
+
 ## Known gaps
 
 - `GET /api/calls/{id}` doesn't return `resolution_evidence_segment_id` or

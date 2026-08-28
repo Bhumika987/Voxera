@@ -49,7 +49,10 @@ export default function AttentionQueue() {
     const total = Object.values(dist).reduce((a, b) => a + b, 0)
     if (!total) return 0
     const negative = (dist.frustrated || 0) + (dist.angry || 0)
-    return Math.round((negative / total) * 100)
+    if (negative === 0) return 0
+    // round to 1 decimal instead of a whole percent — a real but small share
+    // (e.g. 6/1441 = 0.4%) would otherwise display as a misleading flat "0%"
+    return Math.round((negative / total) * 1000) / 10
   })()
 
   return (
@@ -78,11 +81,11 @@ export default function AttentionQueue() {
                 icon={CheckCircle2}
                 label="Resolution rate"
                 value={`${overview.resolution_rate}%`}
-                sub={`${overview.resolved} resolved · ${overview.unresolved} unresolved`}
+                sub={`${overview.resolved} resolved · ${overview.unresolved} unresolved · ${overview.unknown} unknown`}
               />
               <KpiCard
                 icon={Frown}
-                label="Negative sentiment"
+                label="Ended negative"
                 value={negativePct != null ? `${negativePct}%` : '—'}
                 sub="Calls ending frustrated or angry"
               />

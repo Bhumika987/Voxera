@@ -60,7 +60,10 @@ def dashboard_overview(db: Session = Depends(get_db)) -> dict:
     """Return aggregated dashboard numbers computed from processed calls.
 
     - Only counts calls where `processed` is True.
-    - `resolved` / `unresolved` are counted from Call.resolution values.
+    - `resolved` / `unresolved` / `unknown` are counted from Call.resolution values
+      (a small number of calls have an "unknown" resolution when the transcript
+      didn't make the outcome clear — these still count toward `total_calls` and
+      the `resolution_rate` denominator, they just aren't resolved or unresolved).
     - `resolution_rate` is percentage (resolved / total_calls) * 100 rounded to 2 decimals.
     - `mood_distribution` tallies observed `final_mood` values.
     - `needs_attention`: no project-wide threshold exists for "needs attention" in
@@ -71,6 +74,7 @@ def dashboard_overview(db: Session = Depends(get_db)) -> dict:
 
     resolved = db.query(func.count()).filter(Call.processed.is_(True), Call.resolution == "resolved").scalar() or 0
     unresolved = db.query(func.count()).filter(Call.processed.is_(True), Call.resolution == "unresolved").scalar() or 0
+    unknown = db.query(func.count()).filter(Call.processed.is_(True), Call.resolution == "unknown").scalar() or 0
 
     # mood distribution: group by final_mood
     mood_rows = db.query(Call.final_mood, func.count()).filter(Call.processed.is_(True)).group_by(Call.final_mood).all()
@@ -116,6 +120,7 @@ def dashboard_overview(db: Session = Depends(get_db)) -> dict:
         "total_calls": total_calls,
         "resolved": resolved,
         "unresolved": unresolved,
+        "unknown": unknown,
         "resolution_rate": resolution_rate,
         "needs_attention": needs_attention,
         "mood_distribution": mood_distribution,
