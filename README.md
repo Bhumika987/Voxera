@@ -1,27 +1,39 @@
-# Vexora — Call-Centre Radar
+# Voxera — Call-Centre Radar
 
 Turns 1,441 recorded bank support calls into searchable, timestamped
 transcripts and flags which calls need a manager's attention today, with
 every judgment tied back to an exact moment in the call.
 
+> **Name note:** the product is **Voxera** (what the frontend, login, and
+> repo say). The backend still carries the earlier spelling **Vexora** in a
+> few internal places — the FastAPI title, some docstrings, the ChromaDB
+> collection `vexora_calls`, and the SQLite file `data/vexora.db`. These are
+> the same project; the split is cosmetic and left alone deliberately so the
+> shipped `vexora.db` keeps working.
+
 ## Project layout
 
 ```
-vexora/
+voxera/
 ├── backend/
 │   ├── pipeline/          # audio -> transcript -> DB (this is the part documented below)
 │   │   ├── step1_split_audio.py       # split stereo mp3 into agent/customer WAV
-│   │   ├── step2_transcribe.py        # AssemblyAI: WAV -> timed text segments
+│   │   ├── step2_transcribe.py        # WAV -> timed text segments (AssemblyAI → Groq Whisper → local faster-whisper)
 │   │   ├── step3_merge_transcript.py  # interleave both channels into one transcript
 │   │   ├── metadata_utils.py          # parse the call metadata JSON
 │   │   ├── process_one_call.py        # full pipeline for one call, saves to SQLite
 │   │   └── batch_process.py           # runs process_one_call.py over all calls concurrently
-│   └── app/
-│       ├── database/schema.py         # SQLite schema (SQLAlchemy models)
-│       ├── services/analyze.py        # AI analysis (intent/mood/resolution/summary) — Groq (openai/gpt-oss-120b)
-│       ├── services/attention_score.py# deterministic needs-attention scoring
-│       ├── services/chroma.py         # ChromaDB semantic search over call summaries
-│       └── main.py                    # FastAPI app — 10 routes, see "Running the API" below
+│   ├── app/
+│   │   ├── database/schema.py         # SQLite schema (SQLAlchemy models)
+│   │   ├── auth.py                    # JWT manager auth — guards every route bar health + login
+│   │   ├── services/analyze.py        # AI analysis (intent/mood/resolution/summary) — Groq chain, local Ollama fallback
+│   │   ├── services/attention_score.py# deterministic needs-attention scoring
+│   │   ├── services/chroma.py         # ChromaDB semantic search over call summaries
+│   │   ├── services/ask.py            # "Ask Voxera" — LLM tool-calling loop over 4 read-only DB tools (POST /api/ask)
+│   │   ├── services/actions.py        # Manager Action Center rule engine (GET/PATCH /api/actions)
+│   │   └── main.py                    # FastAPI app — 17 routes, see "Running the API" below
+│   ├── scripts/          # one-off migrations/backfills (add columns, intent_category, resolution evidence, audio paths)
+│   └── tests/            # test_pipeline.py (deterministic pipeline) + test_api.py (API, stubbed auth)
 ├── data/
 │   ├── audio/<id>.mp3       # provided
 │   ├── metadata/<id>.json   # provided
@@ -34,19 +46,25 @@ vexora/
 **Status:** the full pipeline (audio → transcript → AI analysis → scored,
 queryable database) is complete and has processed all 1,441 calls. The
 FastAPI layer (`backend/app/main.py`) and the React dashboard
-(`frontend/`) are both built and run against that data.
+(`frontend/`) are both built and run against that data. On top of the core
+radar, three features are live: **JWT manager auth** (`app/auth.py`, login
+page), the **Ask Voxera** assistant (`app/services/ask.py`, floating chat
+widget), and the **Manager Action Center** (`app/services/actions.py`, a
+tracked task list) — all covered below.
 
-`app/services/analyze.py` calls Groq's `openai/gpt-oss-120b` model with a
-JSON-schema-constrained prompt (Groq's JSON mode only guarantees valid JSON,
-not schema conformance, so the response is validated against a Pydantic
-model and retried — with the validation error fed back to the model — if it
-doesn't match). Every evidence segment id it returns is checked against the
-real transcript before being trusted; a hallucinated id is dropped to `None`
-rather than passed through, per the brief's "wrong evidence scores negative"
-rule. If you swap models, check `client.models.list()` against your account
-first — the SDK's type hints can lag behind what's actually retired
-(`llama-3.3-70b-versatile`, the originally planned default, was already gone
-from this account's catalog).
+`app/services/analyze.py` calls Groq (`GROQ_MODEL_CHAIN` — currently
+`openai/gpt-oss-120b` then `openai/gpt-oss-20b`) with a
+JSON-schema-constrained prompt, falling back to a fully local Ollama model
+(`llama3.1:8b`) as an always-succeeds last resort if Groq is unreachable.
+Groq's JSON mode only guarantees valid JSON, not schema conformance, so the
+response is validated against a Pydantic model and retried — with the
+validation error fed back to the model — if it doesn't match. Every evidence
+segment id it returns is checked against the real transcript before being
+trusted; a hallucinated id is dropped to `None` rather than passed through,
+per the brief's "wrong evidence scores negative" rule. If you swap models,
+check `client.models.list()` against your account first — the SDK's type
+hints can lag behind what's actually retired (`llama-3.3-70b-versatile`, the
+originally planned default, was already gone from this account's catalog).
 
 ## Setup
 
@@ -154,11 +172,14 @@ venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 Interactive docs at `http://localhost:8000/docs`. CORS is pre-configured for
 `http://localhost:3000` and `http://localhost:5173` (the frontend dev
-server). Routes: `/api/health`, `/api/dashboard/overview`,
-`/api/calls/{id}`, `/api/calls/{id}/audio`, `/api/attention`, `/api/intents`,
-`/api/customers`, `/api/customers/{id}/calls`, `/api/agents`,
-`/api/trends`, `/api/search?q=`, `POST /api/ask`, `/api/actions`,
-`GET /api/actions/{id}`, `PATCH /api/actions/{id}`, `POST /api/actions/generate`.
+server). All 17 routes: `/api/health` and `POST /api/auth/login` are open;
+the rest require a bearer token (`/api/calls/{id}/audio` also accepts
+`?token=`). `POST /api/auth/login`, `/api/health`,
+`/api/dashboard/overview`, `/api/calls/{id}`, `/api/calls/{id}/audio`,
+`/api/attention`, `/api/intents`, `/api/customers`,
+`/api/customers/{id}/calls`, `/api/agents`, `/api/trends`, `/api/search?q=`,
+`POST /api/ask`, `GET /api/actions`, `GET /api/actions/{id}`,
+`PATCH /api/actions/{id}`, `POST /api/actions/generate`.
 
 `GET /api/actions` powers the **Manager Action Center** — instead of another
 analytics view, Vexora turns the data into a tracked task list. Deterministic
@@ -191,13 +212,18 @@ cd frontend
 npm install
 npm run dev
 ```
-Open `http://localhost:5173`. `frontend/.env` points it at
-`VITE_API_BASE_URL=http://localhost:8000` — change that if you run the API
-elsewhere. Stack: React + Vite, Tailwind CSS v4, React Router, Recharts,
-Axios, lucide-react. Dark/light theme toggle persists in `localStorage`
-(defaults to dark). See `frontend/src/components/` for the shared,
-evidence-first building blocks (`EvidenceChip`, `ScorePill`, `MoodChip`,
-`MoodTimeline`, `AudioPlayer`) reused across the pages.
+Open `http://localhost:5173`. First load shows the login page
+(`src/pages/Login.jsx`); sign in with the manager credentials from
+`backend/.env` and the token is kept in `localStorage` (key `voxera-token`),
+attached to every request by an axios interceptor that bounces you back to
+`/login` on any 401 (`src/api/client.js`, `src/context/AuthContext.jsx`).
+`frontend/.env` points it at `VITE_API_BASE_URL=http://localhost:8000` —
+change that if you run the API elsewhere. Stack: React + Vite, Tailwind CSS
+v4, React Router, Recharts, Axios, lucide-react. Dark/light theme toggle
+persists in `localStorage` (defaults to dark). See
+`frontend/src/components/` for the shared, evidence-first building blocks
+(`EvidenceChip`, `ScorePill`, `MoodChip`, `MoodTimeline`, `AudioPlayer`)
+reused across the pages.
 
 **Ask Voxa** (`src/components/AskWidget.jsx`) is a floating chat widget
 pinned to the bottom-left corner on every page, over `POST /api/ask`: ask a
@@ -217,9 +243,12 @@ Reopen. Status changes `PATCH` straight back and the list refreshes.
 
 ## Testing
 
-Unit tests cover the deterministic parts of the pipeline (transcript merging,
-timestamp formatting, needs-attention scoring) — no API keys, network calls,
-or database needed, so they run in well under a second:
+`tests/test_pipeline.py` covers the deterministic parts of the pipeline
+(transcript merging, timestamp formatting, needs-attention scoring) — no API
+keys, network calls, or database needed. `tests/test_api.py` exercises the
+FastAPI routes against an in-memory SQLite DB with auth stubbed (plus a
+`real_auth` fixture that drives the genuine JWT path). Both run in well under
+a second:
 ```
 cd backend
 python -m pytest tests/ -v
