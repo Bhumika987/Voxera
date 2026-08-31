@@ -1,4 +1,4 @@
-"""Minimal JWT auth for the Vexora API.
+"""Minimal JWT auth for the Voxera API.
 
 One hardcoded "manager" account whose credentials live in ``backend/.env``
 (a username plus a bcrypt hash of the password) — not the database. A single

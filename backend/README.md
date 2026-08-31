@@ -1,4 +1,4 @@
-# Backend — Vexora
+# Backend — Voxera
 
 Quick start (backend folder):
 

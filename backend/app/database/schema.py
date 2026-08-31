@@ -1,5 +1,5 @@
 """
-SQLite schema for Vexora, via SQLAlchemy ORM.
+SQLite schema for Voxera, via SQLAlchemy ORM.
 
 Design notes:
 - `calls.id` is the call's own id from the source data (the mp3/json filename
@@ -156,7 +156,7 @@ class MoodEvent(Base):
 class ActionItem(Base):
     """A manager task auto-generated from the call data by app/services/actions.py.
 
-    The Action Center turns Vexora from "here's a problem" into "here's a problem
+    The Action Center turns Voxera from "here's a problem" into "here's a problem
     you're tracking to closure".
 
     - ``source_key`` is the deterministic identity of the underlying finding

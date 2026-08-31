@@ -4,12 +4,13 @@ Turns 1,441 recorded bank support calls into searchable, timestamped
 transcripts and flags which calls need a manager's attention today, with
 every judgment tied back to an exact moment in the call.
 
-> **Name note:** the product is **Voxera** (what the frontend, login, and
-> repo say). The backend still carries the earlier spelling **Vexora** in a
-> few internal places — the FastAPI title, some docstrings, the ChromaDB
-> collection `vexora_calls`, and the SQLite file `data/vexora.db`. These are
-> the same project; the split is cosmetic and left alone deliberately so the
-> shipped `vexora.db` keeps working.
+> **Name note:** the product is **Voxera** everywhere it's shown — frontend,
+> login, repo, and the FastAPI/Swagger title. Two on-disk artifact names
+> still use the earlier spelling: the SQLite file `data/vexora.db` and the
+> ChromaDB collection `vexora_calls`. Those are left as-is on purpose —
+> renaming them would strand the database and vector store that already ship
+> with a full run of all 1,441 calls. They're storage filenames, not the
+> product name.
 
 ## Project layout
 
@@ -238,7 +239,7 @@ the rest require a bearer token (`/api/calls/{id}/audio` also accepts
 `PATCH /api/actions/{id}`, `POST /api/actions/generate`.
 
 `GET /api/actions` powers the **Manager Action Center** — instead of another
-analytics view, Vexora turns the data into a tracked task list. Deterministic
+analytics view, Voxera turns the data into a tracked task list. Deterministic
 rules in `app/services/actions.py` (unresolved backlog by intent category,
 severe negative mood swings, customers with repeat unresolved calls, calls that
 ended with an upset customer) each emit findings with a stable `source_key`;

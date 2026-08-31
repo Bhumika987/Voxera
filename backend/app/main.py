@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Vexora API", lifespan=lifespan)
+app = FastAPI(title="Voxera API", lifespan=lifespan)
 
 # Allow common local dev origins (frontend running on 3000 or 5173).
 app.add_middleware(
