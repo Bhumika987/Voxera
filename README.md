@@ -4,14 +4,6 @@ Turns 1,441 recorded bank support calls into searchable, timestamped
 transcripts and flags which calls need a manager's attention today, with
 every judgment tied back to an exact moment in the call.
 
-> **Name note:** the product is **Voxera** everywhere it's shown — frontend,
-> login, repo, and the FastAPI/Swagger title. Two on-disk artifact names
-> still use the earlier spelling: the SQLite file `data/vexora.db` and the
-> ChromaDB collection `vexora_calls`. Those are left as-is on purpose —
-> renaming them would strand the database and vector store that already ship
-> with a full run of all 1,441 calls. They're storage filenames, not the
-> product name.
-
 ## Project layout
 
 ```
