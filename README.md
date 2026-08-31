@@ -66,6 +66,62 @@ check `client.models.list()` against your account first — the SDK's type
 hints can lag behind what's actually retired (`llama-3.3-70b-versatile`, the
 originally planned default, was already gone from this account's catalog).
 
+## Approach — how the work is done
+
+The whole system is built around one rule: **every claim the UI makes must
+point back to a specific line of a specific call.** That constraint drives
+the pipeline, the data model, and the API.
+
+**1. Ingest & transcribe (offline batch).** Each call is a stereo MP3 with
+the agent on one channel and the customer on the other.
+`step1_split_audio.py` splits the channels (bundled `ffmpeg`, no system
+install). `step2_transcribe.py` transcribes each channel *separately* — so
+speaker attribution is a fact of which file the audio came from, never a
+diarization guess — through a three-layer fallback (AssemblyAI → Groq
+Whisper → local `faster-whisper`) so a run never dies on a flaky provider.
+`step3_merge_transcript.py` interleaves the two channels by timestamp into
+one transcript and assigns each utterance a stable id (`seg_0`, `seg_1`, …).
+Those ids are the citation anchors used everywhere downstream.
+
+**2. AI analysis — bounded, validated, evidence-checked.**
+`app/services/analyze.py` sends the numbered transcript to an LLM (Groq model
+chain, local Ollama fallback) and asks for intent, mood arc, resolution
+status, a summary, **and the `seg_*` id that justifies each judgment.** The
+reply is validated against a Pydantic schema and retried with the error fed
+back if it doesn't conform. Then every cited id is checked against the real
+transcript — a hallucinated id is dropped to `None` rather than shown, on the
+principle that wrong evidence is worse than no evidence.
+
+**3. Needs-attention score — deterministic, not AI.**
+`app/services/attention_score.py` computes the 0–100 priority score with
+fixed rules (unresolved +30, ends angry +20, mood crash +15, repeat contact
++15, manager requested +10, long call +5). It mixes AI outputs (resolution,
+mood) with pipeline-only facts (duration, prior-call count, a keyword scan
+for escalation language). Each triggered rule is stored with its reason,
+points, and the segment that justifies it — so the score is fully auditable
+and reproducible, and a manager can see *why* a call surfaced.
+
+**4. Serve (FastAPI, read-only over the populated DB).** The API never
+re-transcribes or re-analyzes; it reads the SQLite DB the batch produced and
+expands every stored `seg_*` reference into its text + timestamp so the
+frontend can render evidence inline and deep-link the audio player. JWT auth
+(`app/auth.py`) gates every route bar health/login.
+
+**5. Two operator layers on top of the raw data.**
+- **Ask Voxera** (`app/services/ask.py`): a natural-language question is
+  answered by an LLM restricted to four parameterised, read-only tools
+  (`aggregate`, `find_calls`, `semantic_search`, `get_call`) — no free-form
+  SQL — and every call it cites is a real `call_id`.
+- **Manager Action Center** (`app/services/actions.py`): deterministic rules
+  turn standing problems (unresolved backlog, mood crashes, repeat
+  unresolved contacts) into a tracked task list. Findings upsert by a stable
+  `source_key` so manager status/notes survive regeneration; a rule that
+  stops firing auto-resolves its task instead of deleting it.
+
+**6. Dashboard (React/Vite).** A thin evidence-first client — shared
+`EvidenceChip` / `ScorePill` / `MoodTimeline` / `AudioPlayer` primitives,
+every score and quote clickable through to the exact moment in the call.
+
 ## Setup
 
 1. **Python 3.10+** (developed against 3.13). Create and activate a venv:
