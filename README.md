@@ -221,14 +221,32 @@ venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 Interactive docs at `http://localhost:8000/docs`. CORS is pre-configured for
 `http://localhost:3000` and `http://localhost:5173` (the frontend dev
-server). All 17 routes: `/api/health` and `POST /api/auth/login` are open;
-the rest require a bearer token (`/api/calls/{id}/audio` also accepts
-`?token=`). `POST /api/auth/login`, `/api/health`,
-`/api/dashboard/overview`, `/api/calls/{id}`, `/api/calls/{id}/audio`,
-`/api/attention`, `/api/intents`, `/api/customers`,
-`/api/customers/{id}/calls`, `/api/agents`, `/api/trends`, `/api/search?q=`,
-`POST /api/ask`, `GET /api/actions`, `GET /api/actions/{id}`,
-`PATCH /api/actions/{id}`, `POST /api/actions/generate`.
+server).
+
+**All 17 endpoints.** `GET /api/health` and `POST /api/auth/login` are
+public; every other route needs an `Authorization: Bearer <token>` header
+(`GET /api/calls/{id}/audio` also accepts `?token=` because `<audio>` can't
+send headers).
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/api/auth/login` | Exchange manager username + password for an 8-hour JWT (401 on bad credentials). |
+| GET | `/api/health` | Liveness check + live `total_calls` count from the DB. |
+| GET | `/api/dashboard/overview` | Aggregated dashboard numbers over processed calls (counts, resolution split, mood, averages). |
+| GET | `/api/calls/{id}` | One processed call: transcript, attention reasons, mood events, AI evidence — every `seg_*` expanded to text + timestamp (404 if not found/processed). |
+| GET | `/api/calls/{id}/audio` | Original MP3 for a processed call, streamed as a file response. |
+| GET | `/api/attention` | Needs-attention queue, newest/highest first. Query: `limit`, `offset`, `intent`, `final_mood`. |
+| GET | `/api/intents` | Distinct free-text `intent` values with a call count each (filter-menu source). |
+| GET | `/api/customers` | Customers with processed calls + aggregates (total, unresolved, last call). |
+| GET | `/api/customers/{id}/calls` | One customer's processed call history, newest first (404 if unknown). |
+| GET | `/api/agents` | Agents with processed calls + performance aggregates. |
+| GET | `/api/trends` | Top intents by call count, with unresolved counts and average attention score. |
+| GET | `/api/search?q=` | Combined structured (SQL LIKE over agent/customer/intent/summary) + semantic (ChromaDB) search over processed calls. |
+| POST | `/api/ask` | "Ask Voxera" — natural-language question answered by an LLM restricted to 4 read-only DB tools; returns `{answer, tool_calls, evidence_call_ids, model_used}` (503 if the LLM provider is unreachable). |
+| GET | `/api/actions` | Action Center task list, regenerated from current data first (falls back to the stored list if generation fails). Query: `status`. |
+| POST | `/api/actions/generate` | Force a regeneration pass; returns `{created, updated, auto_resolved}`. |
+| GET | `/api/actions/{id}` | One action item plus its frozen entity cohort resolved to displayable rows (404 if unknown). |
+| PATCH | `/api/actions/{id}` | Apply a manager action — change `status`, (re)assign, or set a note; a manual status change clears the `auto_resolved` flag. |
 
 `GET /api/actions` powers the **Manager Action Center** — instead of another
 analytics view, Voxera turns the data into a tracked task list. Deterministic

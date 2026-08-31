@@ -48,17 +48,25 @@ Notes:
 - The Chroma sync will index already-processed calls from `data/vexora.db` into the local `data/chroma_db` store. It does not re-run AssemblyAI transcription or Groq analysis; it only reads existing summaries and metadata and adds them to Chroma.
 - Do NOT run tests against the real `data/vexora.db`. The test suite uses an in-memory test database.
 
-Available API endpoints:
+Available API endpoints (17 total; `GET /api/health` and `POST /api/auth/login`
+are public, the rest need `Authorization: Bearer <token>`):
 
-- GET /api/health
-- GET /api/dashboard/overview
-- GET /api/attention
-- GET /api/calls/{call_id}
-- GET /api/calls/{call_id}/audio
-- GET /api/customers
-- GET /api/customers/{customer_id}/calls
-- GET /api/agents
-- GET /api/trends
-- GET /api/search?q=
+- POST /api/auth/login — manager login, returns an 8-hour JWT
+- GET  /api/health — liveness + live call count
+- GET  /api/dashboard/overview — aggregated dashboard numbers
+- GET  /api/calls/{call_id} — one processed call with transcript + evidence
+- GET  /api/calls/{call_id}/audio — original MP3 (also accepts `?token=`)
+- GET  /api/attention — needs-attention queue (`limit`, `offset`, `intent`, `final_mood`)
+- GET  /api/intents — distinct intent values with counts
+- GET  /api/customers — customers with aggregated stats
+- GET  /api/customers/{customer_id}/calls — one customer's call history
+- GET  /api/agents — agents with aggregated performance stats
+- GET  /api/trends — top intents with unresolved counts + avg attention
+- GET  /api/search?q= — structured + semantic search over calls
+- POST /api/ask — "Ask Voxera" natural-language question over the data
+- GET  /api/actions — Action Center task list (regenerates first; `status` filter)
+- POST /api/actions/generate — force a regeneration pass
+- GET  /api/actions/{action_id} — one action item + its entity cohort
+- PATCH /api/actions/{action_id} — change status / assignee / note
 
 Do not commit or share machine-specific absolute paths or API keys.
