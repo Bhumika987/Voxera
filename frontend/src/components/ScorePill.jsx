@@ -13,11 +13,13 @@ export default function ScorePill({ score, size = 'md', showBandLabel = false, c
   const band = getScoreBand(score)
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md font-semibold ${SIZES[size] || SIZES.md} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md font-bold ${SIZES[size] || SIZES.md} ${className}`}
       style={{ color, backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` }}
       title={`Attention score ${score ?? '—'} · ${scoreBandLabel(score)}`}
     >
-      <span className="font-mono-data">{score ?? '—'}</span>
+      <span className="font-mono-data" style={{ fontSize: '1.15em', fontWeight: 700 }}>
+        {score ?? '—'}
+      </span>
       {showBandLabel && <span className="font-normal opacity-90">{scoreBandLabel(score)}</span>}
     </span>
   )

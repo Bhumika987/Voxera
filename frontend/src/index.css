@@ -11,6 +11,9 @@
   --color-accent: #3568d4;
   --color-text-primary: #14161a;
   --color-text-secondary: #5a616d;
+  /* Background-glow tint only (see .bg-app-gradient) — kept separate from
+     --color-accent so it never bleeds into buttons/links/focus rings. */
+  --color-gradient-tint: var(--color-accent);
 }
 
 [data-theme="dark"] {
@@ -21,6 +24,7 @@
   --color-accent: #5b8def;
   --color-text-primary: #edeff2;
   --color-text-secondary: #98a1b0;
+  --color-gradient-tint: #8b5cf6;
 }
 
 @theme inline {
@@ -60,6 +64,36 @@ body {
   color: var(--color-app-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Colored depth so a page isn't a flat slab of white / near-black — purple in
+   dark mode, blue in light mode (see --color-gradient-tint). Applied to the
+   full-viewport app shell (which doesn't itself scroll); panels stay opaque
+   so text contrast is unaffected. Glows sit in all four corners. */
+.bg-app-gradient {
+  background-color: var(--color-app-bg);
+  background-image:
+    radial-gradient(
+      62rem 62rem at 6% -12%,
+      color-mix(in srgb, var(--color-gradient-tint) 32%, transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      62rem 62rem at 108% -5%,
+      color-mix(in srgb, var(--color-gradient-tint) 32%, transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      62rem 62rem at 4% 112%,
+      color-mix(in srgb, var(--color-gradient-tint) 32%, transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      62rem 62rem at 104% 108%,
+      color-mix(in srgb, var(--color-gradient-tint) 32%, transparent),
+      transparent 65%
+    );
+  background-repeat: no-repeat;
 }
 
 ::selection {

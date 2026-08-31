@@ -46,10 +46,10 @@ export default function AgentsTrends() {
 
   return (
     <>
-      <TopBar>
-        <h1 className="text-sm font-semibold text-app-text">Agents & Trends</h1>
-        <p className="text-xs text-app-text-secondary">Coaching priorities and trending issues, not daily triage</p>
-      </TopBar>
+      <TopBar
+        title="Agents & Trends"
+        subtitle="Coaching priorities and trending issues, not daily triage"
+      />
 
       <main className="flex-1 overflow-y-auto p-6">
         {loading && <LoadingState label="Loading agent and trend data…" />}
@@ -70,9 +70,9 @@ export default function AgentsTrends() {
                     <thead>
                       <tr className="border-b border-app-border text-xs uppercase tracking-wide text-app-text-secondary">
                         <th className="px-4 py-2 font-medium">Agent</th>
-                        <th className="px-4 py-2 font-medium">Calls</th>
+                        <th className="px-4 py-2 text-right font-medium">Calls</th>
                         <th className="px-4 py-2 font-medium">Resolution</th>
-                        <th className="px-4 py-2 font-medium">Avg handle time</th>
+                        <th className="px-4 py-2 text-right font-medium">Avg handle time</th>
                         <th className="px-4 py-2 font-medium">Attention calls</th>
                       </tr>
                     </thead>
@@ -80,14 +80,14 @@ export default function AgentsTrends() {
                       {agents.map((a) => (
                         <tr key={a.agent_id} className="border-b border-app-border last:border-b-0">
                           <td className="px-4 py-3 font-medium text-app-text">{a.name}</td>
-                          <td className="px-4 py-3 text-app-text-secondary">{a.total_calls}</td>
+                          <td className="px-4 py-3 text-right text-app-text-secondary">{a.total_calls}</td>
                           <td className="px-4 py-3 text-app-text-secondary">
                             {a.resolution_rate}%
                             <span className="ml-1 text-xs">
                               ({a.resolved}/{a.unresolved})
                             </span>
                           </td>
-                          <td className="px-4 py-3 font-mono-data text-xs text-app-text-secondary">
+                          <td className="px-4 py-3 text-right font-mono-data text-xs text-app-text-secondary">
                             {formatDuration(a.avg_duration)}
                           </td>
                           <td className="px-4 py-3">

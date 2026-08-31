@@ -1,19 +1,20 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react'
+import { Search, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react'
 import TopBar from '../components/TopBar.jsx'
 import { LoadingState, ErrorState, EmptyState } from '../components/PageState.jsx'
 import { useApi } from '../hooks/useApi.js'
 import { getCustomers } from '../api/client.js'
-import { formatRelativeTime, initials } from '../utils/format.js'
+import { formatDateTime, formatRelativeTime, initials } from '../utils/format.js'
 import { scoreColor } from '../utils/scoreBands.js'
+import { getAvatarColor } from '../utils/avatarColor.js'
 
 const COLUMNS = [
   { key: 'name', label: 'Customer' },
-  { key: 'total_calls', label: 'Total calls' },
-  { key: 'unresolved_calls', label: 'Unresolved' },
+  { key: 'total_calls', label: 'Total calls', align: 'right' },
+  { key: 'unresolved_calls', label: 'Unresolved', align: 'right' },
   { key: 'last_call_at', label: 'Last call' },
-  { key: 'avg_attention_score', label: 'Avg attention' },
+  { key: 'avg_attention_score', label: 'Avg attention', align: 'right' },
 ]
 
 export default function CustomerList() {
@@ -50,10 +51,7 @@ export default function CustomerList() {
 
   return (
     <>
-      <TopBar>
-        <h1 className="text-sm font-semibold text-app-text">Customers</h1>
-        <p className="text-xs text-app-text-secondary">{data ? `${data.count} customers` : 'Browse by name'}</p>
-      </TopBar>
+      <TopBar title="Customers" subtitle={data ? `${data.count} customers` : 'Browse by name'} />
 
       <main className="flex-1 overflow-y-auto p-6">
         {loading && <LoadingState label="Loading customers…" />}
@@ -80,11 +78,16 @@ export default function CustomerList() {
                     <thead>
                       <tr className="border-b border-app-border text-xs uppercase tracking-wide text-app-text-secondary">
                         {COLUMNS.map((col) => (
-                          <th key={col.key} className="px-4 py-2 font-medium">
+                          <th
+                            key={col.key}
+                            className={`px-4 py-2 font-medium ${col.align === 'right' ? 'text-right' : ''}`}
+                          >
                             <button
                               type="button"
                               onClick={() => toggleSort(col.key)}
-                              className="flex items-center gap-1 hover:text-app-text"
+                              className={`flex items-center gap-1 hover:text-app-text ${
+                                col.align === 'right' ? 'ml-auto' : ''
+                              }`}
                             >
                               {col.label}
                               {sortKey === col.key ? (
@@ -106,18 +109,21 @@ export default function CustomerList() {
                         <tr
                           key={c.customer_id}
                           onClick={() => navigate(`/customers/${c.customer_id}`)}
-                          className="cursor-pointer border-b border-app-border last:border-b-0 hover:bg-app-panel-raised"
+                          className="group cursor-pointer border-b border-app-border last:border-b-0 hover:bg-app-panel-raised"
                         >
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2.5">
-                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-app-accent/15 text-[11px] font-semibold text-app-accent">
+                              <span
+                                style={{ background: getAvatarColor(c.name || '') }}
+                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                              >
                                 {initials(c.name)}
                               </span>
                               <span className="font-medium text-app-text">{c.name}</span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-app-text-secondary">{c.total_calls}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 text-right text-app-text-secondary">{c.total_calls}</td>
+                          <td className="px-4 py-3 text-right">
                             {c.unresolved_calls > 0 ? (
                               <span className="inline-flex items-center gap-1.5 text-mood-angry">
                                 <span className="h-1.5 w-1.5 rounded-full bg-mood-angry" />
@@ -127,9 +133,11 @@ export default function CustomerList() {
                               <span className="text-app-text-secondary">0</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-app-text-secondary">{formatRelativeTime(c.last_call_at)}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
+                          <td className="px-4 py-3 text-app-text-secondary">
+                            <span title={formatDateTime(c.last_call_at)}>{formatRelativeTime(c.last_call_at)}</span>
+                          </td>
+                          <td className="relative px-4 py-3 pr-7 text-right">
+                            <div className="flex items-center justify-end gap-2">
                               <span className="font-mono-data text-xs text-app-text-secondary">
                                 {c.avg_attention_score}
                               </span>
@@ -143,6 +151,10 @@ export default function CustomerList() {
                                 />
                               </div>
                             </div>
+                            <ChevronRight
+                              size={14}
+                              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-app-text-secondary opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"
+                            />
                           </td>
                         </tr>
                       ))}

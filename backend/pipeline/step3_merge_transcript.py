@@ -44,7 +44,13 @@ def merge_transcript(agent_segments: list[dict], customer_segments: list[dict]) 
         }
     """
     combined = list(agent_segments) + list(customer_segments)
-    combined.sort(key=lambda seg: seg["start"])
+    # On an exact start-time tie (rare — same rounded timestamp from both
+    # channels), prefer agent before customer: this matches every real tie
+    # case found in the existing dataset (agent's statement, then a short
+    # customer reply/backchannel at the same timestamp), so it's a deliberate
+    # design choice, not the accidental byproduct of list-concatenation order
+    # it used to be.
+    combined.sort(key=lambda seg: (seg["start"], 0 if seg["speaker"] == "agent" else 1))
 
     segments = []
     for i, seg in enumerate(combined, start=1):

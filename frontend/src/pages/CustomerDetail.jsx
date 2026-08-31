@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ChevronRight } from 'lucide-react'
 import TopBar from '../components/TopBar.jsx'
 import ScorePill from '../components/ScorePill.jsx'
 import ResolutionPill from '../components/ResolutionPill.jsx'
@@ -8,7 +8,8 @@ import MoodChip from '../components/MoodChip.jsx'
 import { LoadingState, ErrorState, EmptyState } from '../components/PageState.jsx'
 import { useApi } from '../hooks/useApi.js'
 import { getCustomerCalls } from '../api/client.js'
-import { formatDate, formatDuration, initials, titleCase, truncate } from '../utils/format.js'
+import { formatDate, formatDuration, formatRelativeTime, initials, titleCase, truncate } from '../utils/format.js'
+import { getAvatarColor } from '../utils/avatarColor.js'
 
 export default function CustomerDetail() {
   const { customerId } = useParams()
@@ -32,11 +33,11 @@ export default function CustomerDetail() {
         <button
           type="button"
           onClick={() => navigate('/customers')}
-          className="mb-1 flex items-center gap-1 text-xs text-app-text-secondary hover:text-app-text"
+          className="mb-1.5 inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-panel px-3 py-1.5 text-sm font-medium text-app-text-secondary transition hover:border-app-accent hover:text-app-text"
         >
-          <ArrowLeft size={12} /> Customers
+          <ArrowLeft size={15} /> Back
         </button>
-        {data && <h1 className="text-sm font-semibold text-app-text">{data.customer_name}</h1>}
+        {data && <h1 className="text-lg font-semibold text-app-text">{data.customer_name}</h1>}
       </TopBar>
 
       <main className="flex-1 overflow-y-auto p-6">
@@ -48,7 +49,10 @@ export default function CustomerDetail() {
         {!loading && !error && data && (
           <>
             <div className="mb-6 flex items-center gap-4 rounded-lg border border-app-border bg-app-panel p-4">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-app-accent/15 text-base font-semibold text-app-accent">
+              <span
+                style={{ background: getAvatarColor(data.customer_name || '') }}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-semibold text-white"
+              >
                 {initials(data.customer_name)}
               </span>
               <div className="grid flex-1 grid-cols-3 gap-4">
@@ -84,8 +88,8 @@ export default function CustomerDetail() {
                         <th className="px-4 py-2 font-medium">Intent</th>
                         <th className="px-4 py-2 font-medium">Mood shift</th>
                         <th className="px-4 py-2 font-medium">Resolution</th>
-                        <th className="px-4 py-2 font-medium">Duration</th>
-                        <th className="px-4 py-2 font-medium">Score</th>
+                        <th className="px-4 py-2 text-right font-medium">Duration</th>
+                        <th className="px-4 py-2 text-right font-medium">Score</th>
                         <th className="px-4 py-2 font-medium">Summary</th>
                       </tr>
                     </thead>
@@ -94,13 +98,15 @@ export default function CustomerDetail() {
                         <tr
                           key={call.call_id}
                           onClick={() => navigate(`/calls/${call.call_id}`)}
-                          className="cursor-pointer border-b border-app-border last:border-b-0 hover:bg-app-panel-raised"
+                          className="group cursor-pointer border-b border-app-border last:border-b-0 hover:bg-app-panel-raised"
                         >
-                          <td className="px-4 py-3 whitespace-nowrap text-app-text-secondary">{formatDate(call.started_at)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-app-text-secondary">
+                            <span title={formatDate(call.started_at)}>{formatRelativeTime(call.started_at)}</span>
+                          </td>
                           <td className="px-4 py-3">
                             <span
                               title={titleCase(call.intent)}
-                              className="inline-flex max-w-[180px] truncate rounded-full border border-app-border px-2 py-0.5 text-xs text-app-text-secondary"
+                              className="inline-block max-w-[180px] truncate text-xs text-app-text-secondary"
                             >
                               {titleCase(call.intent) || 'Unknown'}
                             </span>
@@ -115,14 +121,21 @@ export default function CustomerDetail() {
                           <td className="px-4 py-3">
                             <ResolutionPill resolution={call.resolution} />
                           </td>
-                          <td className="px-4 py-3 font-mono-data text-xs text-app-text-secondary">
+                          <td className="px-4 py-3 text-right font-mono-data text-xs text-app-text-secondary">
                             {formatDuration(call.duration_seconds)}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 text-right">
                             <ScorePill score={call.attention_score} size="sm" />
                           </td>
-                          <td className="px-4 py-3 max-w-[260px] truncate text-xs text-app-text-secondary" title={call.summary}>
+                          <td
+                            className="relative px-4 py-3 pr-7 max-w-[260px] truncate text-xs text-app-text-secondary"
+                            title={call.summary}
+                          >
                             {truncate(call.summary, 70)}
+                            <ChevronRight
+                              size={14}
+                              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-app-text-secondary opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"
+                            />
                           </td>
                         </tr>
                       ))}

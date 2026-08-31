@@ -20,3 +20,4 @@ node_modules/
 frontend/dist/
 
 .DS_Store
+scratch_unprocessed.txt

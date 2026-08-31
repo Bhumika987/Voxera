@@ -100,8 +100,8 @@ def transcribe_assemblyai(audio_path: Path, speaker_label: Speaker) -> list[dict
     return [
         {
             "speaker": speaker_label,
-            "start": round(s.start / 1000.0, 2),
-            "end": round(s.end / 1000.0, 2),
+            "start": round(s.start / 1000.0, 3),
+            "end": round(s.end / 1000.0, 3),
             "text": s.text.strip(),
         }
         for s in transcript.get_sentences()
@@ -127,8 +127,8 @@ def transcribe_groq(audio_path: Path, speaker_label: Speaker) -> list[dict]:
     return [
         {
             "speaker": speaker_label,
-            "start": round(seg["start"] if isinstance(seg, dict) else seg.start, 2),
-            "end": round(seg["end"] if isinstance(seg, dict) else seg.end, 2),
+            "start": round(seg["start"] if isinstance(seg, dict) else seg.start, 3),
+            "end": round(seg["end"] if isinstance(seg, dict) else seg.end, 3),
             "text": (seg["text"] if isinstance(seg, dict) else seg.text).strip(),
         }
         for seg in segments
@@ -148,8 +148,8 @@ def transcribe_local(audio_path: Path, speaker_label: Speaker) -> list[dict]:
             result.append(
                 {
                     "speaker": speaker_label,
-                    "start": round(segment.start, 2),
-                    "end": round(segment.end, 2),
+                    "start": round(segment.start, 3),
+                    "end": round(segment.end, 3),
                     "text": text,
                 }
             )

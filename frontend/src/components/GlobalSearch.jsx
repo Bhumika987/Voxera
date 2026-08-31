@@ -8,8 +8,18 @@ import ScorePill from './ScorePill.jsx'
 const MIN_QUERY_LENGTH = 3
 const DEBOUNCE_MS = 350
 
-/** Global semantic search — lives in the top bar on every page, not a route of its
- * own. Wraps GET /api/search (ChromaDB similarity over call summaries). */
+const MATCH_LABELS = {
+  agent: 'Agent',
+  customer: 'Customer',
+  intent: 'Intent',
+  summary: 'Text match',
+  semantic: 'Meaning',
+}
+const matchTypeLabel = (t) => MATCH_LABELS[t] || 'Match'
+
+/** Global search — lives in the top bar on every page, not a route of its own.
+ * Wraps GET /api/search: structured matches (agent / customer / intent / summary
+ * text) plus ChromaDB semantic matches over call summaries. */
 export default function GlobalSearch() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -74,14 +84,14 @@ export default function GlobalSearch() {
   }
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-md">
+    <div ref={containerRef} className="relative w-[280px] shrink-0">
       <div className="flex items-center gap-2 rounded-md border border-app-border bg-app-bg px-3 py-1.5 focus-within:border-app-accent">
         <Search size={15} className="shrink-0 text-app-text-secondary" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Search calls by meaning — e.g. “angry customer unresolved”"
+          placeholder="Search — agent, customer, intent, or meaning"
           className="w-full bg-transparent text-sm text-app-text placeholder:text-app-text-secondary focus:outline-none"
         />
         {loading && <Loader2 size={14} className="shrink-0 animate-spin text-app-text-secondary" />}
@@ -93,7 +103,7 @@ export default function GlobalSearch() {
       </div>
 
       {showDropdown && (
-        <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-[70vh] overflow-y-auto rounded-lg border border-app-border bg-app-panel shadow-xl">
+        <div className="absolute right-0 top-full z-30 mt-2 w-[440px] max-w-[90vw] max-h-[70vh] overflow-y-auto rounded-lg border border-app-border bg-app-panel shadow-xl">
           {error && <div className="p-4 text-sm text-app-text-secondary">{error}</div>}
 
           {!error && !loading && results.length === 0 && (
@@ -130,7 +140,9 @@ export default function GlobalSearch() {
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   <ScorePill score={r.attention_score} size="sm" />
                   <span className="rounded-full border border-app-accent/40 px-2 py-0.5 text-xs text-app-accent">
-                    {Math.round((r.similarity_score ?? 0) * 100)}% match
+                    {r.similarity_score != null
+                      ? `${Math.round(r.similarity_score * 100)}% match`
+                      : matchTypeLabel(r.match_type)}
                   </span>
                 </div>
               </button>

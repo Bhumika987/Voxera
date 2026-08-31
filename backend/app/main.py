@@ -1,3 +1,6 @@
+import json
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Generator
 
 from fastapi import FastAPI, Depends
@@ -6,14 +9,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from fastapi import HTTPException
+from pydantic import BaseModel
+from app import auth
+from app.auth import verify_token, verify_token_flexible
 from app.database.schema import (
     get_session,
+    Base,
+    engine,
     Call,
     Customer,
     Agent,
     TranscriptSegment,
     AttentionReason,
     MoodEvent,
+    ActionItem,
 )
 from pathlib import Path
 from fastapi.responses import FileResponse
@@ -23,7 +32,16 @@ from sqlalchemy import case
 # chroma is imported lazily inside the endpoint to avoid import-time failures
 
 
-app = FastAPI(title="Vexora API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create any tables missing from an already-populated vexora.db (e.g.
+    # action_items on first run after this feature landed). checkfirst=True is
+    # the default, so existing tables and data are left untouched.
+    Base.metadata.create_all(engine)
+    yield
+
+
+app = FastAPI(title="Vexora API", lifespan=lifespan)
 
 # Allow common local dev origins (frontend running on 3000 or 5173).
 app.add_middleware(
@@ -46,6 +64,27 @@ def get_db() -> Generator[Session, None, None]:
         session.close()
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.post("/api/auth/login", response_model=TokenResponse, tags=["auth"])
+def login(body: LoginRequest) -> TokenResponse:
+    """Exchange the manager username + password for an 8-hour JWT.
+
+    Returns 401 if the credentials don't match the configured manager account.
+    """
+    if not auth.authenticate_manager(body.username, body.password):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    return TokenResponse(access_token=auth.create_access_token(body.username))
+
+
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)) -> dict:
     """Return a simple health object including a dynamic count of calls
@@ -55,7 +94,7 @@ def health(db: Session = Depends(get_db)) -> dict:
     return {"status": "ok", "total_calls": total_calls}
 
 
-@app.get("/api/dashboard/overview")
+@app.get("/api/dashboard/overview", dependencies=[Depends(verify_token)])
 def dashboard_overview(db: Session = Depends(get_db)) -> dict:
     """Return aggregated dashboard numbers computed from processed calls.
 
@@ -128,7 +167,7 @@ def dashboard_overview(db: Session = Depends(get_db)) -> dict:
 
 
 
-@app.get("/api/calls/{call_id}")
+@app.get("/api/calls/{call_id}", dependencies=[Depends(verify_token)])
 def get_call(call_id: str, db: Session = Depends(get_db)) -> dict:
     """Return a single processed call with related records for frontend rendering.
 
@@ -241,29 +280,64 @@ def get_call(call_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 
-@app.get("/api/attention")
-def list_attention(db: Session = Depends(get_db)) -> dict:
-    """Return up to 20 processed calls that qualify for manager attention,
-    ordered by attention_score descending.
+@app.get("/api/attention", dependencies=[Depends(verify_token)])
+def list_attention(
+    limit: int = 20,
+    offset: int = 0,
+    intent: str | None = None,
+    final_mood: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Processed calls, ordered by attention_score descending, paginated with limit/offset.
 
-    Qualification: processed AND (attention_score >= 30 OR attention reason contains manager/supervisor/escalat)
+    Two modes:
+    - No `intent` / `final_mood` filter (default): only calls that qualify for
+      manager attention — processed AND (attention_score >= 30 OR an attention
+      reason contains manager/supervisor/escalat).
+    - With a filter: every processed call matching that exact `intent` and/or
+      `final_mood`, attention-qualified or not. This is what powers the
+      dashboard's "click an intent" / "click a mood" drill-downs.
+
+    - `limit` is clamped to 1..100 (default 20); `offset` is floored at 0.
+    - `total` is the full count of matching calls (not just this page), so the
+      caller can page through all of them.
+    - `filtered` echoes whether a filter was applied; `intent` / `final_mood`
+      echo the active filter values.
     """
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    intent = intent.strip() if intent else None
+    final_mood = final_mood.strip().lower() if final_mood else None
+    filtered = bool(intent) or bool(final_mood)
+
     manager_kw = ("manager", "supervisor", "escalat")
     or_clauses = [AttentionReason.reason.ilike(f"%{kw}%") for kw in manager_kw]
 
     # subquery of call_ids with manager-like reasons
     mgr_subq = db.query(AttentionReason.call_id).filter(or_(*or_clauses)).subquery()
 
-    # main query: processed calls that either have high score or are in mgr_subq
-    q = (
-        db.query(Call)
-        .filter(Call.processed.is_(True))
-        .filter(or_(Call.attention_score >= 30, Call.id.in_(mgr_subq)))
-        .order_by(Call.attention_score.desc())
-        .limit(20)
-    )
+    conditions = [Call.processed.is_(True)]
+    if filtered:
+        if intent:
+            conditions.append(Call.intent == intent)
+        if final_mood:
+            conditions.append(func.lower(Call.final_mood) == final_mood)
+    else:
+        conditions.append(or_(Call.attention_score >= 30, Call.id.in_(mgr_subq)))
 
-    calls = q.all()
+    total = db.query(func.count()).select_from(Call).filter(*conditions).scalar() or 0
+
+    # id.asc() is a stable tiebreaker — many calls share a score, so without it
+    # a row could appear on two pages (or none) as offset moves.
+    calls = (
+        db.query(Call)
+        .filter(*conditions)
+        .order_by(Call.attention_score.desc(), Call.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     out_calls = []
     for c in calls:
@@ -290,10 +364,33 @@ def list_attention(db: Session = Depends(get_db)) -> dict:
             }
         )
 
-    return {"count": len(out_calls), "calls": out_calls}
+    return {
+        "count": len(out_calls),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "filtered": filtered,
+        "intent": intent,
+        "final_mood": final_mood,
+        "calls": out_calls,
+    }
 
 
-@app.get("/api/customers")
+@app.get("/api/intents", dependencies=[Depends(verify_token)])
+def list_intents(db: Session = Depends(get_db)) -> dict:
+    """Distinct free-text `intent` values across processed calls, with a call
+    count each, most common first — used to populate the dashboard filter menu."""
+    rows = (
+        db.query(Call.intent, func.count(Call.id))
+        .filter(Call.processed.is_(True), Call.intent.isnot(None), Call.intent != "")
+        .group_by(Call.intent)
+        .order_by(func.count(Call.id).desc(), Call.intent.asc())
+        .all()
+    )
+    return {"count": len(rows), "intents": [{"intent": i, "count": c} for i, c in rows]}
+
+
+@app.get("/api/customers", dependencies=[Depends(verify_token)])
 def list_customers(db: Session = Depends(get_db)) -> dict:
     """Return customers that have processed calls with aggregated stats.
 
@@ -339,7 +436,7 @@ def list_customers(db: Session = Depends(get_db)) -> dict:
 
 
 
-@app.get("/api/customers/{customer_id}/calls")
+@app.get("/api/customers/{customer_id}/calls", dependencies=[Depends(verify_token)])
 def customer_calls(customer_id: int, db: Session = Depends(get_db)) -> dict:
     """Return processed call history for one customer, newest first.
 
@@ -375,7 +472,7 @@ def customer_calls(customer_id: int, db: Session = Depends(get_db)) -> dict:
     return {"customer_id": customer.id, "customer_name": customer.name, "total_calls": len(out_calls), "calls": out_calls}
 
 
-@app.get("/api/agents")
+@app.get("/api/agents", dependencies=[Depends(verify_token)])
 def list_agents(db: Session = Depends(get_db)) -> dict:
     """Return agents that have processed calls with aggregated performance stats.
 
@@ -450,7 +547,7 @@ def list_agents(db: Session = Depends(get_db)) -> dict:
     return {"count": len(agents), "agents": agents}
 
 
-@app.get("/api/trends")
+@app.get("/api/trends", dependencies=[Depends(verify_token)])
 def list_trends(db: Session = Depends(get_db)) -> dict:
     """Return top intents (by processed call count) with unresolved counts and avg attention.
 
@@ -499,13 +596,24 @@ def list_trends(db: Session = Depends(get_db)) -> dict:
     return {"count": len(trends), "trends": trends}
 
 
-@app.get("/api/search")
-def search(q: str | None = None, db: Session = Depends(get_db)) -> dict:
-    """Thin wrapper around the existing ChromaDB semantic search.
+SEARCH_MAX_RESULTS = 30
 
-    - `q` is required and trimmed.
-    - Uses `app.services.chroma.search_calls` and returns its results directly
-      inside a small envelope: `{query, count, results}`.
+
+@app.get("/api/search", dependencies=[Depends(verify_token)])
+def search(q: str | None = None, db: Session = Depends(get_db)) -> dict:
+    """Search processed calls, combining two passes:
+
+    1. Structured (SQL LIKE) matches against agent name, customer name, intent
+       text, and summary text — so "Elizabeth" returns every call that agent
+       handled, and "pay a bill" returns every bill-payment call.
+    2. Semantic (ChromaDB similarity over summaries) for meaning-based queries
+       like "angry customer unresolved". Best-effort: an empty or unavailable
+       index just contributes nothing instead of failing the request.
+
+    Results are merged and de-duplicated by call_id, structured matches first
+    (they're exact), then semantic matches by similarity. Each result carries a
+    `match_type` of "agent" | "customer" | "intent" | "summary" | "semantic";
+    `similarity_score` is null for structured matches.
     """
     if q is None:
         raise HTTPException(status_code=400, detail="Missing required query parameter 'q'")
@@ -513,21 +621,120 @@ def search(q: str | None = None, db: Session = Depends(get_db)) -> dict:
     if not query:
         raise HTTPException(status_code=400, detail="Query 'q' must not be empty or whitespace")
 
-    try:
-        # lazy import to avoid crashing if chromadb isn't installed or the collection isn't available
-        from app.services import chroma as chroma_service
-        results = chroma_service.search_calls(query)
-    except ImportError as e:
-        raise HTTPException(status_code=503, detail=f"Chroma client not available: {e}")
-    except Exception as e:
-        # chroma.search_calls returns [] when no index exists; any other runtime error becomes 503
-        raise HTTPException(status_code=503, detail=f"Search service error: {e}")
+    like = f"%{query}%"
+    needle = query.lower()
+    results: list[dict] = []
+    seen: set[str] = set()
 
+    def _row(call: Call, match_type: str) -> dict:
+        return {
+            "call_id": call.id,
+            "customer_name": call.customer.name if call.customer else "",
+            "agent_name": call.agent.name if call.agent else "",
+            "intent": call.intent or "",
+            "resolution": call.resolution or "unknown",
+            "attention_score": call.attention_score if call.attention_score is not None else 0,
+            "final_mood": call.final_mood or "unknown",
+            "similarity_score": None,
+            "match_type": match_type,
+            "summary": call.summary or "",
+        }
+
+    structured = (
+        db.query(Call)
+        .join(Agent, Call.agent_id == Agent.id)
+        .join(Customer, Call.customer_id == Customer.id)
+        .filter(
+            Call.processed.is_(True),
+            or_(
+                Agent.name.ilike(like),
+                Customer.name.ilike(like),
+                Call.intent.ilike(like),
+                Call.summary.ilike(like),
+            ),
+        )
+        .order_by(Call.attention_score.desc(), Call.started_at.desc())
+        .limit(SEARCH_MAX_RESULTS)
+        .all()
+    )
+    for call in structured:
+        if call.id in seen:
+            continue
+        agent_name = (call.agent.name if call.agent else "").lower()
+        customer_name = (call.customer.name if call.customer else "").lower()
+        if needle in agent_name:
+            match_type = "agent"
+        elif needle in customer_name:
+            match_type = "customer"
+        elif call.intent and needle in call.intent.lower():
+            match_type = "intent"
+        else:
+            match_type = "summary"
+        results.append(_row(call, match_type))
+        seen.add(call.id)
+
+    if len(results) < SEARCH_MAX_RESULTS:
+        try:
+            # lazy import so a missing/broken chroma install can't take search down
+            from app.services import chroma as chroma_service
+
+            semantic_hits = [h for h in chroma_service.search_calls(query) if h["call_id"] not in seen]
+        except Exception:
+            semantic_hits = []  # semantic layer is optional — structured results still stand
+
+        if semantic_hits:
+            # keep only hits that are still real processed calls (chroma can lag the DB)
+            valid_ids = {
+                cid
+                for (cid,) in db.query(Call.id).filter(
+                    Call.id.in_([h["call_id"] for h in semantic_hits]),
+                    Call.processed.is_(True),
+                )
+            }
+            for hit in semantic_hits:
+                if hit["call_id"] not in valid_ids or hit["call_id"] in seen:
+                    continue
+                results.append({**hit, "match_type": "semantic"})
+                seen.add(hit["call_id"])
+                if len(results) >= SEARCH_MAX_RESULTS:
+                    break
+
+    results = results[:SEARCH_MAX_RESULTS]
     return {"query": query, "count": len(results), "results": results}
 
 
 
-@app.get("/api/calls/{call_id}/audio")
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/ask", dependencies=[Depends(verify_token)])
+def ask(body: AskRequest, db: Session = Depends(get_db)) -> dict:
+    """Answer a natural-language question about the call data.
+
+    The LLM (Groq) is given a small fixed set of read-only tools over this
+    database — it plans which to call, gets real numbers back, and writes an
+    answer over them, citing the call_ids it used as evidence. It cannot run
+    arbitrary SQL or invent a statistic. See app/services/ask.py.
+
+    - 400 if the question is empty.
+    - 503 if the LLM provider is unreachable or GROQ_API_KEY is unset.
+    """
+    from app.services import ask as ask_service
+
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question must not be empty")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="Question is too long (max 500 characters)")
+
+    try:
+        return ask_service.answer_question(question, db)
+    except ask_service.AskError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/calls/{call_id}/audio", dependencies=[Depends(verify_token_flexible)])
 def get_call_audio(call_id: str, db: Session = Depends(get_db)) -> FileResponse:
     """Return the original MP3 for a processed call.
 
@@ -559,3 +766,184 @@ def get_call_audio(call_id: str, db: Session = Depends(get_db)) -> FileResponse:
             return FileResponse(path=str(candidate), media_type="audio/mpeg", filename=f"{call_id}.mp3")
 
     raise HTTPException(status_code=404, detail=f"Audio file for call {call_id} not found (checked {len(candidates)} locations)")
+
+
+# --- Manager Action Center ------------------------------------------------
+
+_PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+class ActionItemUpdate(BaseModel):
+    status: str | None = None
+    assigned_to: str | None = None
+    note: str | None = None
+
+
+def _serialize_action_item(item: ActionItem) -> dict:
+    try:
+        entity_ids = json.loads(item.entity_ids or "[]")
+    except (TypeError, ValueError):
+        entity_ids = []
+    return {
+        "id": item.id,
+        "source_key": item.source_key,
+        "rule_id": item.rule_id,
+        "title": item.title,
+        "description": item.description,
+        "priority": item.priority,
+        "group_label": item.group_label,
+        "metric_count": item.metric_count,
+        "entity_type": item.entity_type,
+        "entity_count": len(entity_ids),
+        "status": item.status,
+        "assigned_to": item.assigned_to,
+        "note": item.note,
+        "auto_resolved": item.auto_resolved,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+    }
+
+
+@app.get("/api/actions", dependencies=[Depends(verify_token)])
+def list_actions(status: str | None = None, db: Session = Depends(get_db)) -> dict:
+    """Return the Action Center task list, regenerating it from the current data first.
+
+    Generation is idempotent and preserves manager-set status / assignee / note
+    (see app/services/actions.py). If it fails for any reason the stored list is
+    still returned — the dashboard degrades rather than erroring.
+
+    - `status` optionally filters to one of open|investigating|resolved|dismissed.
+    - `actions` are ordered by priority (high→low) then by metric_count desc.
+    - `status_counts` / `open_total` summarise the whole list, ignoring `status`.
+    """
+    from app.services import actions as actions_service
+
+    try:
+        actions_service.generate(db)
+    except Exception:
+        db.rollback()
+
+    query = db.query(ActionItem)
+    if status:
+        query = query.filter(ActionItem.status == status)
+    items = query.all()
+    items.sort(key=lambda i: (_PRIORITY_RANK.get(i.priority, 3), -i.metric_count, i.id))
+
+    counts: dict = {}
+    for row_status, cnt in db.query(ActionItem.status, func.count()).group_by(ActionItem.status):
+        counts[row_status] = cnt
+    for expected in ("open", "investigating", "resolved", "dismissed"):
+        counts.setdefault(expected, 0)
+
+    return {
+        "count": len(items),
+        "status_counts": counts,
+        "open_total": counts["open"] + counts["investigating"],
+        "actions": [_serialize_action_item(i) for i in items],
+    }
+
+
+@app.post("/api/actions/generate", dependencies=[Depends(verify_token)])
+def regenerate_actions(db: Session = Depends(get_db)) -> dict:
+    """Force a regeneration pass and return what changed (created / updated / auto_resolved)."""
+    from app.services import actions as actions_service
+
+    return actions_service.generate(db)
+
+
+@app.get("/api/actions/{action_id}", dependencies=[Depends(verify_token)])
+def get_action(action_id: int, db: Session = Depends(get_db)) -> dict:
+    """One action item plus its frozen cohort resolved to displayable rows.
+
+    `entities` is the list of calls (or customers) captured when the task was
+    created, in the task's own order; rows that no longer exist are skipped.
+    Returns 404 if the action id is unknown.
+    """
+    item = db.get(ActionItem, action_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+    try:
+        entity_ids = json.loads(item.entity_ids or "[]")
+    except (TypeError, ValueError):
+        entity_ids = []
+
+    out = _serialize_action_item(item)
+    out["entities"] = []
+
+    if item.entity_type == "call":
+        calls = {c.id: c for c in db.query(Call).filter(Call.id.in_(entity_ids)).all()}
+        for cid in entity_ids:
+            c = calls.get(cid)
+            if c is None:
+                continue
+            out["entities"].append(
+                {
+                    "type": "call",
+                    "call_id": c.id,
+                    "customer_name": c.customer.name if c.customer else None,
+                    "agent_name": c.agent.name if c.agent else None,
+                    "intent": c.intent,
+                    "resolution": c.resolution,
+                    "final_mood": c.final_mood,
+                    "attention_score": c.attention_score,
+                    "started_at": c.started_at.isoformat() if c.started_at else None,
+                }
+            )
+    elif item.entity_type == "customer":
+        wanted = [int(x) for x in entity_ids]
+        customers = {c.id: c for c in db.query(Customer).filter(Customer.id.in_(wanted)).all()}
+        for cust_id in wanted:
+            cust = customers.get(cust_id)
+            if cust is None:
+                continue
+            calls = db.query(Call).filter(Call.customer_id == cust_id, Call.processed.is_(True)).all()
+            last_call = max((c.started_at for c in calls if c.started_at), default=None)
+            out["entities"].append(
+                {
+                    "type": "customer",
+                    "customer_id": cust.id,
+                    "name": cust.name,
+                    "total_calls": len(calls),
+                    "unresolved_calls": sum(1 for c in calls if c.resolution == "unresolved"),
+                    "last_call_at": last_call.isoformat() if last_call else None,
+                }
+            )
+
+    return out
+
+
+@app.patch("/api/actions/{action_id}", dependencies=[Depends(verify_token)])
+def update_action(action_id: int, body: ActionItemUpdate, db: Session = Depends(get_db)) -> dict:
+    """Apply a manager action to one task: change status, (re)assign, or set a note.
+
+    A manual status change is authoritative — it clears the `auto_resolved` flag so
+    the next generation pass won't treat the row as system-managed. Passing an
+    empty string for `assigned_to` / `note` clears that field.
+
+    - 404 if the action id is unknown.
+    - 422 if `status` is not one of open|investigating|resolved|dismissed.
+    """
+    from app.services import actions as actions_service
+
+    item = db.get(ActionItem, action_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Action {action_id} not found")
+
+    if body.status is not None:
+        if body.status not in actions_service.VALID_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid status '{body.status}'. Expected one of {actions_service.VALID_STATUSES}.",
+            )
+        item.status = body.status
+        item.auto_resolved = False
+    if body.assigned_to is not None:
+        item.assigned_to = body.assigned_to.strip() or None
+    if body.note is not None:
+        item.note = body.note.strip() or None
+
+    item.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    return _serialize_action_item(item)

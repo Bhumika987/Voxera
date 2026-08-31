@@ -8,6 +8,12 @@ tqdm==4.66.5
 # --- shared / database ---
 sqlalchemy==2.0.35
 
+# --- auth (JWT) — app/auth.py ---
+python-jose[cryptography]>=3.5.0
+# bcrypt is used directly for password hashing (it's already a transitive dep of
+# chromadb, which pins bcrypt>=5). passlib 1.7.4 can't drive bcrypt 5, so it is
+# intentionally NOT used here despite the original brief mentioning passlib[bcrypt].
+
 # --- dev / tests ---
 pytest>=8.3.0
 httpx>=0.28.1

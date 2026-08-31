@@ -153,6 +153,48 @@ class MoodEvent(Base):
     call: Mapped["Call"] = relationship(back_populates="mood_events")
 
 
+class ActionItem(Base):
+    """A manager task auto-generated from the call data by app/services/actions.py.
+
+    The Action Center turns Vexora from "here's a problem" into "here's a problem
+    you're tracking to closure".
+
+    - ``source_key`` is the deterministic identity of the underlying finding
+      (e.g. ``"unresolved_category:BILL_PAYMENT"``). Regeneration upserts on it,
+      so a manager's status / assignee / note survives every dashboard refresh
+      instead of being wiped and recreated.
+    - ``entity_ids`` freezes the cohort (a JSON list of call ids or customer ids)
+      at the moment the task is created, so "investigate these 33 calls" keeps
+      meaning the same 33 even as newer data would shift a rolling count.
+    - a task whose rule stops firing is marked ``auto_resolved`` (status
+      ``resolved``) rather than deleted, keeping the problem lifecycle visible.
+    """
+
+    __tablename__ = "action_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    rule_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False)  # "high" | "medium" | "low"
+    group_label: Mapped[str] = mapped_column(String(32), nullable=False)  # UI section, e.g. "Unresolved issues"
+    metric_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # the N in "investigate N ..."
+
+    entity_type: Mapped[str] = mapped_column(String(16), nullable=False)  # "call" | "customer"
+    entity_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # frozen cohort, JSON list
+
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open|investigating|resolved|dismissed
+    assigned_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)  # dismiss reason / follow-up note
+    auto_resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    last_generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)

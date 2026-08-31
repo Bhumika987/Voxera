@@ -15,6 +15,7 @@ import { getCall, getCallAudioUrl } from '../api/client.js'
 import { formatDateTime, formatDuration, initials, titleCase } from '../utils/format.js'
 import { parseRepeatContact } from '../utils/attentionReason.js'
 import { scoreColor } from '../utils/scoreBands.js'
+import { getAvatarColor } from '../utils/avatarColor.js'
 
 function CallDetailContent({ call }) {
   const repeat = call.attention_reasons?.find((r) => parseRepeatContact(r.reason))
@@ -143,17 +144,20 @@ export default function CallDetail() {
         <button
           type="button"
           onClick={() => navigate(-1)}
-          className="mb-1 flex items-center gap-1 text-xs text-app-text-secondary hover:text-app-text"
+          className="mb-1.5 inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-panel px-3 py-1.5 text-sm font-medium text-app-text-secondary transition hover:border-app-accent hover:text-app-text"
         >
-          <ArrowLeft size={12} /> Back
+          <ArrowLeft size={15} /> Back
         </button>
         {call && (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-app-accent/15 text-[10px] font-semibold text-app-accent">
+            <span
+              style={{ background: getAvatarColor(call.customer?.name || '') }}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+            >
               {initials(call.customer?.name)}
             </span>
-            <h1 className="text-sm font-semibold text-app-text">{call.customer?.name || 'Unknown customer'}</h1>
-            <span className="text-xs text-app-text-secondary">
+            <h1 className="text-lg font-semibold text-app-text">{call.customer?.name || 'Unknown customer'}</h1>
+            <span className="text-sm text-app-text-secondary">
               with {call.agent?.name || 'unknown agent'} · {formatDateTime(call.started_at)} ·{' '}
               {formatDuration(call.duration_seconds)}
             </span>

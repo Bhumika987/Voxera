@@ -73,6 +73,18 @@ from this account's catalog).
    Get a free AssemblyAI key at assemblyai.com (includes $50 free credit),
    and a free Groq key at console.groq.com.
 
+   The same `.env` also holds the dashboard login (see `backend/app/auth.py`):
+   ```
+   JWT_SECRET_KEY=<long random string>
+   MANAGER_USERNAME=manager
+   MANAGER_PASSWORD_HASH='<bcrypt hash of the password>'
+   ```
+   Generate a hash with
+   `python -c "import bcrypt; print(bcrypt.hashpw(b'your-pw', bcrypt.gensalt()).decode())"`.
+   Every route except `/api/health` and `POST /api/auth/login` requires a
+   bearer token from the login endpoint (8-hour expiry); the frontend shows a
+   login page and stores the token in `localStorage`.
+
 3. **Data** — place the provided files at `data/audio/*.mp3` and
    `data/metadata/*.json` (already done if you're reading this in the
    working copy).
@@ -142,10 +154,33 @@ venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 Interactive docs at `http://localhost:8000/docs`. CORS is pre-configured for
 `http://localhost:3000` and `http://localhost:5173` (the frontend dev
-server). Ten routes: `/api/health`, `/api/dashboard/overview`,
-`/api/calls/{id}`, `/api/calls/{id}/audio`, `/api/attention`,
+server). Routes: `/api/health`, `/api/dashboard/overview`,
+`/api/calls/{id}`, `/api/calls/{id}/audio`, `/api/attention`, `/api/intents`,
 `/api/customers`, `/api/customers/{id}/calls`, `/api/agents`,
-`/api/trends`, `/api/search?q=`.
+`/api/trends`, `/api/search?q=`, `POST /api/ask`, `/api/actions`,
+`GET /api/actions/{id}`, `PATCH /api/actions/{id}`, `POST /api/actions/generate`.
+
+`GET /api/actions` powers the **Manager Action Center** — instead of another
+analytics view, Vexora turns the data into a tracked task list. Deterministic
+rules in `app/services/actions.py` (unresolved backlog by intent category,
+severe negative mood swings, customers with repeat unresolved calls, calls that
+ended with an upset customer) each emit findings with a stable `source_key`;
+`generate()` upserts them into the `action_items` table so a manager's status
+(`open` → `investigating` → `resolved` / `dismissed`), assignee, and notes
+survive every regeneration. A task whose rule stops firing is auto-resolved,
+not deleted — the problem lifecycle stays visible. The frozen `entity_ids`
+cohort means "investigate these 33 calls" keeps meaning the same 33.
+`GET /api/actions` regenerates before returning (best-effort); `PATCH` applies a
+manager action; `POST /api/actions/generate` forces a pass. The `action_items`
+table is created automatically on API startup for an existing `vexora.db`.
+
+`POST /api/ask` is the "Ask Voxera" assistant — a natural-language question
+(`{"question": "..."}`) answered by an LLM that can only call four read-only,
+parameterised tools over the database (`app/services/ask.py`): aggregate,
+find_calls, semantic_search, get_call. It plans the tool calls, reasons over
+the real results, and returns `{answer, tool_calls, evidence_call_ids,
+model_used}` — no arbitrary SQL, and every cited call is a real `call_id`.
+Needs `GROQ_API_KEY`; returns 503 if the provider is unreachable.
 
 ## Running the frontend
 
@@ -162,7 +197,23 @@ elsewhere. Stack: React + Vite, Tailwind CSS v4, React Router, Recharts,
 Axios, lucide-react. Dark/light theme toggle persists in `localStorage`
 (defaults to dark). See `frontend/src/components/` for the shared,
 evidence-first building blocks (`EvidenceChip`, `ScorePill`, `MoodChip`,
-`MoodTimeline`, `AudioPlayer`) reused across all five pages.
+`MoodTimeline`, `AudioPlayer`) reused across the pages.
+
+**Ask Voxa** (`src/components/AskWidget.jsx`) is a floating chat widget
+pinned to the bottom-left corner on every page, over `POST /api/ask`: ask a
+question in plain English, get an answer with the supporting `call_id`s
+rendered as chips that link straight to the call detail, plus a trace of
+which tools the assistant ran. Open/closed state persists in `localStorage`.
+The launcher/avatar is the Voxa mascot in `public/voxa.svg` (the source
+artwork with its `viewBox` cropped to the circular badge; falls back to an
+icon if it fails to load).
+
+**Action Center** (`src/pages/ActionCenter.jsx`, sidebar → Action Center) is
+the operations counterpart to the Attention Queue: it lists the tasks
+`GET /api/actions` generated, grouped by Active / Resolved / Dismissed, each
+with a priority dot, the affected calls/customers (expand to drill in), and
+the manager controls — Investigating, Resolved, Assign follow-up, Dismiss,
+Reopen. Status changes `PATCH` straight back and the list refreshes.
 
 ## Testing
 
